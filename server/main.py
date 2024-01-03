@@ -28,7 +28,7 @@ statDict = {
 
 
 detect_way = 0
-camera = 'http://192.168.39.217:8080/video'
+camera = 0
 NoneType = type(None)
 os.environ.setdefault('QT_QPA_PLATFORM','xcb')
 # Load the pre-trained face recognition model
