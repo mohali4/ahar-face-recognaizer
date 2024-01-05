@@ -4,8 +4,8 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing.managers import SyncManager
 import time
-from .mprocess import PPool, Process, Synchronized, sharedValue, sharedArray
-from .managers import frameManager, faceManager
+from ..mprocess import PPool, Process, Synchronized, sharedValue, sharedArray
+from ..managers import frameManager, faceManager
 detector = dlib.get_frontal_face_detector()
 # status:
 #   0:
