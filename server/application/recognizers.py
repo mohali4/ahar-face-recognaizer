@@ -24,12 +24,12 @@ def recognizerLoop(status:sharedValue, SHframe:frameManager, SHfaces:faceManager
     def Exited():
         return ExitFlag.get()
     while True:
-        print('running')
+        # print('running')
         if Exited():
             break
         match status.get() :
             case 0: #FREE
-                time.sleep(0.01)
+                time.sleep(0.1)
             case 1: #GO_CALC
                 frame, frameTime = SHframe.copy()
                 status.set(2)
@@ -45,7 +45,7 @@ def recognizerLoop(status:sharedValue, SHframe:frameManager, SHfaces:faceManager
                 status.set(0)
                 # cv2.imshow("Face Recognition", frame)
                 # if cv2.waitKey(1) & 0xFF == ord('q'):
-                #     break
+                    # break
 
 
 
