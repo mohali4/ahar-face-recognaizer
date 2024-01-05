@@ -1,4 +1,8 @@
 from .init import (
-    PPool,
-    Process
+    recognizer,
+    recognizersPool
 )
+__all__=[
+    'recognizer',
+    'recognizersPool'
+]

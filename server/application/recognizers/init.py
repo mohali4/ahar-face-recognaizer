@@ -29,7 +29,7 @@ def recognizerLoop(status:sharedValue, SHframe:frameManager, SHfaces:faceManager
             break
         match status.get() :
             case 0: #FREE
-                time.sleep(0.1)
+                time.sleep(0.01)
             case 1: #GO_CALC
                 frame, frameTime = SHframe.copy()
                 status.set(2)
@@ -60,6 +60,10 @@ class recognizer(Process):
     def is_free(self):
         return self.status.get() == 0
     
+    @property
+    def is_buffer_lock(self):
+        return self.status.get() == 1
+
     def render(self):
         self.status.set(1)
 
