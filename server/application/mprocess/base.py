@@ -17,7 +17,9 @@ class basePPool :
     def init(self,*args):
         if self.len < self.num:
             for _ in range(self.num-self.len):
-                self.new(*args)
+                self.new(*args,name=self.get_name())
+    def get_name(self):
+        return 'Process_' + str(self.len)
     def __init__(self, num=None):
         if num :
             self.num = num

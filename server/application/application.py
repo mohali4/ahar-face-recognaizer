@@ -19,6 +19,7 @@ from .managers import (
     faceManager,
     frameManager
 )
+from .models import Frame
 
 # camera = 'http://192.168.149.216:8080/video'
 FRAME_RENEW = 15
@@ -31,9 +32,8 @@ os.environ.setdefault('QT_QPA_PLATFORM','xcb')
 class display_manager():
     def init(self):
         self.cap = cv2.VideoCapture(camera)
-    def __init__(self, faceM:faceManager, frameM:frameManager, ExitFlag):
+    def __init__(self, faceM:faceManager, ExitFlag):
         self.faceM = faceM
-        self.frameM = frameM
         self.exited = ExitFlag
         self._lastframe = None
         self.status = 0
@@ -43,7 +43,7 @@ class display_manager():
             return []
         for face in faces:
             yield face[1:]
-    def last_frame(self):
+    def last_frame(self) -> Frame:
         return self._lastframe
     def loop(self):
         def Exited():
@@ -60,7 +60,7 @@ class display_manager():
             ret, frame = self.cap.read()
             # print('capture time: ',time.time()-inpt)
             # inpt = time.time()
-            self._lastframe = frame
+            self._lastframe = Frame(frame, now())
             # print('refrenc buffer: ',time.time()-inpt)
             # Iterate over detected faces
             # inpt = time.time()
@@ -76,22 +76,19 @@ class display_manager():
 
 
 class task_manager():
-    def __init__ (self, PP:recognizersPool, frameM:frameManager, faceM:faceManager, displayM:display_manager, ExitFlag):
+    def __init__ (self, PP:recognizersPool, faceM:faceManager, displayM:display_manager, ExitFlag):
         self.pp = PP
-        self.frameM  = frameM
         self.faceM = faceM
         self.displayM = displayM
         self.exited = ExitFlag
         
-    def frameNow(self):
+    def frameNow(self) -> Frame:
         return self.displayM.last_frame()
     def faceUpdated(self):
         dmStatus = self.displayM.status
         if not dmStatus:
             return False
         return  dmStatus <= self.faceM.status
-    def setSHFrame(self,frame):
-        self.frameM.set(frame)
     def loop(self):
         def Exited():
             return self.exited.get() == 1
@@ -104,10 +101,9 @@ class task_manager():
                 if self.pp.has_free:
                     frame = self.frameNow()
                     if frame is not None:
-                        self.setSHFrame(
+                        self.pp.render(
                             frame
                         )
-                        self.pp.render()
             time.sleep(0.1)
         Exit()
 
@@ -128,22 +124,25 @@ def main():
     cap = cv2.VideoCapture(camera)
     capw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     caph = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    CAP_SIZE = (caph,capw)
+    CAP_SIZE = (caph,capw,3)
     cap.release()
     # PAPER_FRAME_BUFFER_SIZE = min(MAX_FRAME_BUFFER_SIZE, CAMERA_SIZE)
     # BUFFER_COEFICIENT = math.sqrt(PAPER_FRAME_BUFFER_SIZE / CAMERA_SIZE)
     # BUFFER_GEOGRERAPHY= tuple(map(int,(np.array((capw,caph),dtype=np.int32) * BUFFER_COEFICIENT).astype(np.int32)))
     DETECT_EXPIRE = 200
-    RECOGNIZER_NUM = 5
+    RECOGNIZER_NUM = 8
 
 
     with mp.Manager() as manager:
         ExitFlag = manager.Value('i',0)
+        settings = manager.dict({
+            'FRAME_SHAPE':CAP_SIZE,
+            'CAP_SIZE':CAP_SIZE
+        })
         facem = faceManager(manager,DETECT_EXPIRE)
-        framem = frameManager(CAP_SIZE)
-        dm = display_manager(facem,framem,ExitFlag)
-        pp = recognizersPool(manager,framem,facem,ExitFlag,1,num=RECOGNIZER_NUM)
-        tm = task_manager(pp,framem,facem,dm,ExitFlag)
+        dm = display_manager(facem,ExitFlag)
+        pp = recognizersPool(manager,settings,facem,ExitFlag,1,num=RECOGNIZER_NUM)
+        tm = task_manager(pp,facem,dm,ExitFlag)
         p1 = mp.Process(
             target=displayProcess,
             args=(dm,tm)

@@ -7,6 +7,7 @@ import multiprocessing as mp
 from multiprocessing.managers import SyncManager
 import math, statistics
 from .timer import now
+from .models import Frame
 FACE_TYPE = list[int]|tuple[int]
 NoneType = type(None)
 
@@ -14,23 +15,24 @@ class frameManager:
     def __init__ (self,shape):
         self.shape = shape
         self._status = sharedValue('L',0)
-        self.size = self.shape[0]*self.shape[1]
+        self.size = 1
+        for s in shape:
+            self.size = self.size * s
         self.buffer = sharedArray('B',self.size)
     def now(self):
         return int(round(time.time(),2) * 100)
-    def set(self, buffer):
+    def set(self, frame:Frame):
         # resized = cv2.resize(buffer,self.shape)
-        gray = cv2.cvtColor(buffer, cv2.COLOR_RGB2GRAY)
-        flat = gray.reshape((self.size,))
+        flat = frame.buffer.reshape((self.size,))
         self.buffer.set(flat)
-        self._status.set(self.now())
+        self._status.set(frame.time)
         # resh = flat.reshape(self.shape)
         # cv2.imshow("Face Recognition", resh)
         # if cv2.waitKey(1) & 0xFF == ord('q'):
         #     exit()
 
-    def get(self)->(np.ndarray,int):
-        return (
+    def get(self)->Frame:
+        return Frame(
             np.frombuffer( 
                 self.buffer.get(),
                 dtype=np.uint8
