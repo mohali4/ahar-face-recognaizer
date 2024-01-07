@@ -6,14 +6,16 @@ import numpy as np
 import math
 import copy
 import multiprocessing as mp
+from multiprocessing.managers import SyncManager
 import threading
 from .timer import now
 from .mprocess import (
-    PPool
+    PPool,
+    sharedValue
 )
 from .recognizers import (
-    recognizer,
-    recognizersPool
+    baseRecognizer,
+    baseRecognizerPool
 )
 from .managers import (
     faceManager,
@@ -23,25 +25,33 @@ from .models import Frame
 
 # camera = 'http://192.168.149.216:8080/video'
 FRAME_RENEW = 15
-camera = 0
-# camera = 'http://192.168.14.238:8080/video'
+# camera = 0
+camera = 'http://192.168.255.225:8080/video'
 NoneType = type(None)
 os.environ.setdefault('QT_QPA_PLATFORM','xcb')
 # MAX_FRAME_BUFFER_SIZE = 480*640
-
-class display_manager():
-    def init(self):
-        self.cap = cv2.VideoCapture(camera)
-    def __init__(self, faceM:faceManager, ExitFlag):
+class forkModel(threading.Thread):...
+# class forkModel(mp.Process):...
+class displayManager(forkModel):
+    def __init__(self, faceM:faceManager, frameM:frameManager,settings:dict, ExitFlag):
         self.faceM = faceM
+        self.frameM= frameM
         self.exited = ExitFlag
         self._lastframe = None
+        self.settings = settings
         self.status = 0
+        self.last_face_get = 0
+        self.faces = []
+        super().__init__(
+            target=self.loop,
+            name='displayManager'
+        )
     def read_faces(self):
-        faces = self.faceM.get()
-        if type(faces) == NoneType:
+        if self.last_face_get + self.settings['READ_FACES_DELAY'] < self.faceM.lastUpdate.get():
+            self.faces = self.faceM.get()
+        if type(self.faces) == NoneType:
             return []
-        for face in faces:
+        for face in self.faces:
             yield face[1:]
     def last_frame(self) -> Frame:
         return self._lastframe
@@ -49,24 +59,17 @@ class display_manager():
         def Exited():
             return self.exited.get() == 1
         def Exit():
-            self.cap.release()
             cv2.destroyAllWindows()
             self.exited.set(1)
     
         while True:
             if Exited():
                 break
-            # inpt = time.time()
-            ret, frame = self.cap.read()
-            # print('capture time: ',time.time()-inpt)
-            # inpt = time.time()
-            self._lastframe = Frame(frame, now())
-            # print('refrenc buffer: ',time.time()-inpt)
-            # Iterate over detected faces
-            # inpt = time.time()
-            for face in self.read_faces():
+            faces = self.read_faces()
+            frame = self.frameM.get().buffer
+            for face in faces:
                 x1, y1, x2, y2 = face[0], face[1], face[2], face[3]
-                cv2.rectangle(frame, (x1,y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(frame, (x1,y1), (x2, y2), self.settings['FACE_BORDER_COLOR'], self.settings['FACE_BORDER'])
             # print('write faces: ',time.time()-inpt)
             self.status = now()
             cv2.imshow("Face Recognition", frame)
@@ -74,16 +77,47 @@ class display_manager():
                 break
         Exit()
 
+class cameraManager(forkModel):
+    def __init__(self, manager:SyncManager, settings:dict, frameM:frameManager, ExitFlag):
+        self.frameM = frameM
+        self.status = sharedValue('B',0)
+        self.exited = ExitFlag
+        super().__init__(
+            target=self.daemon,
+            name='cameraManager'
+        )
+    def init(self):
+        self.cap = cv2.VideoCapture(camera)
+    def daemon(self):
+        self.init()
+        self.loop()
+    def loop(self):
+        def Exited():
+            return self.exited.get() == 1
+        def Exit():
+            self.cap.release()
+            self.exited.set(1)
+    
+        while True:
+            if Exited():
+                break
+            ret, frame = self.cap.read()
+            self.frameM.set(Frame(frame, now()))
+        Exit()
 
-class task_manager():
-    def __init__ (self, PP:recognizersPool, faceM:faceManager, displayM:display_manager, ExitFlag):
+class taskManager(mp.Process):
+    def __init__ (self, PP:baseRecognizerPool, faceM:faceManager, frameM:frameManager, ExitFlag):
         self.pp = PP
         self.faceM = faceM
-        self.displayM = displayM
+        self.frameM = frameM
         self.exited = ExitFlag
-        
+        super().__init__(
+            target=self.loop,
+            name='taskManager'
+        )
+
     def frameNow(self) -> Frame:
-        return self.displayM.last_frame()
+        return self.frameM.get()
     def faceUpdated(self):
         dmStatus = self.displayM.status
         if not dmStatus:
@@ -97,7 +131,8 @@ class task_manager():
         while True:
             if Exited():
                 break
-            if not self.faceUpdated():
+            # if not self.faceUpdated():
+            if True :
                 if self.pp.has_free:
                     frame = self.frameNow()
                     if frame is not None:
@@ -106,19 +141,6 @@ class task_manager():
                         )
             time.sleep(0.1)
         Exit()
-
-def displayProcess(dm:display_manager,tm:task_manager):
-    dm.init()
-    dmt = threading.Thread(
-        target=dm.loop
-    )
-    tmt = threading.Thread(
-        target=tm.loop
-    )
-    dmt.start()
-    tmt.start()
-    dmt.join()
-    tmt.join()
 
 def main():
     cap = cv2.VideoCapture(camera)
@@ -129,26 +151,31 @@ def main():
     # PAPER_FRAME_BUFFER_SIZE = min(MAX_FRAME_BUFFER_SIZE, CAMERA_SIZE)
     # BUFFER_COEFICIENT = math.sqrt(PAPER_FRAME_BUFFER_SIZE / CAMERA_SIZE)
     # BUFFER_GEOGRERAPHY= tuple(map(int,(np.array((capw,caph),dtype=np.int32) * BUFFER_COEFICIENT).astype(np.int32)))
-    DETECT_EXPIRE = 200
-    RECOGNIZER_NUM = 8
+    # DETECT_EXPIRE = 200
+    RECOGNIZER_NUM = 5
 
 
     with mp.Manager() as manager:
         ExitFlag = manager.Value('i',0)
-        settings = manager.dict({
+        settings = {
             'FRAME_SHAPE':CAP_SIZE,
-            'CAP_SIZE':CAP_SIZE
-        })
-        facem = faceManager(manager,DETECT_EXPIRE)
-        dm = display_manager(facem,ExitFlag)
-        pp = recognizersPool(manager,settings,facem,ExitFlag,1,num=RECOGNIZER_NUM)
-        tm = task_manager(pp,facem,dm,ExitFlag)
-        p1 = mp.Process(
-            target=displayProcess,
-            args=(dm,tm)
-        )
-        p1.start()
+            'FACE_BORDER_COLOR':(255,100,100),
+            'FACE_BORDER':2,
+            'DETECT_EXPIRE':800,
+            'READ_FACES_DELAY':150
+        }
+        framem = frameManager(CAP_SIZE)
+        facem = faceManager(manager,settings)
+        cm = cameraManager(manager,settings,framem,ExitFlag)
+        dm = displayManager(facem,framem,settings,ExitFlag)
+        pp = baseRecognizerPool(manager,settings,facem,ExitFlag,1,num=RECOGNIZER_NUM)
+        tm = taskManager(pp,facem,framem,ExitFlag)
+        cm.start()
+        dm.start()
+        tm.start()
         pp.start()
-        p1.join()
+        cm.join()
+        dm.join()
+        tm.join()
         pp.join()
  

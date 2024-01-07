@@ -1,8 +1,8 @@
-from .init import (
-    recognizer,
-    recognizersPool
+from .base import (
+    baseRecognizer,
+    baseRecognizerPool
 )
 __all__=[
-    'recognizer',
-    'recognizersPool'
+    'baseRecognizer',
+    'baseRecognizerPool'
 ]

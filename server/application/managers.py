@@ -7,7 +7,7 @@ import multiprocessing as mp
 from multiprocessing.managers import SyncManager
 import math, statistics
 from .timer import now
-from .models import Frame
+from .models import Frame, Face
 FACE_TYPE = list[int]|tuple[int]
 NoneType = type(None)
 
@@ -18,7 +18,7 @@ class frameManager:
         self.size = 1
         for s in shape:
             self.size = self.size * s
-        self.buffer = sharedArray('B',self.size)
+        self.buffer = sharedArray('B',self.size,noLock=True)
     def now(self):
         return int(round(time.time(),2) * 100)
     def set(self, frame:Frame):
@@ -49,24 +49,32 @@ class frameManager:
     def status(self):
         return self._status.get()
 class faceManager:
+    buffer_size = 6
     expire=20
-    def __init__(self,manager:SyncManager,expire=None):
+    def __init__(self,manager:SyncManager,settings:dict):
         self._q = manager.list()
         self.lastUpdate = manager.Value('L',0)
         self.lock = manager.Lock()
         self.locked = False
-        if expire:
-            self.expire = expire
+        self.expire = settings['DETECT_EXPIRE']
     def now(self):
         return now()
     @property
-    def q(self):
+    def q(self)->list[Face]:
         while None in self._q : time.sleep(0.01)
-        return np.array(
+        s = self.buffer_size
+        faces = []
+        for _face in np.array(
             self._q,
             dtype=np.int64
-        ).reshape((len(self._q)//5,5))
-    def _find_alternative(self,item:FACE_TYPE):
+        ).reshape((len(self._q)//s,s)):
+            faces.append(
+                Face(
+                    _face[2:],_face[1],_face[0]
+                )
+            )
+        return faces
+    def _find_alternative(self,item:Face):
         def is_aternative(one,two):
             x11, y11, x12, y12 = one
             x21, y21, x22, y22 = two
@@ -102,33 +110,48 @@ class faceManager:
                 )
             )
         for condidate in self.q:
-            if is_aternative(item, condidate[1:]):
+            if is_aternative(item.points, condidate.points):
                 return condidate
         return None
-    def push(self, face:FACE_TYPE, time=None):
+    def sync(self, faces:list[Face]):
         self.acquire()
-        self.remove_olds()
+        for face in faces:
+            self.push(face,noLock=True)
+        self.release()
+    def updateTime(self,time:int):
+        if time > self.lastUpdate.get():
+            self.lastUpdate.set(time)
+    def push(self, face:Face, noLock=False):
+        if not noLock:
+            self.acquire()
+        # self.remove_olds()
         alt = self._find_alternative(face)
         if type(alt) != NoneType:
             self.remove(alt)
-        time = time or self.now()
-        self.lastUpdate.set(time)
-        self._q.append(time)
-        for x in face:
+        self.updateTime(face.time)
+        for x in self.face2buffer(face):
             self._q.append(x)
-        self.release()
+        if not noLock:
+            self.release()
     def get(self):
         self.acquire()
         self.remove_olds()
         ret = copy.deepcopy(self.q)
         self.release()
         return ret
-    def remove(self,face:FACE_TYPE):
-        key = face[0]
-        for i in range(0,self._q.__len__(),5):
-            if self._q[i] == key:
-                self._q[:] = self._q[:i] + self._q[i+5:] + [0 for _ in range(5)]
-                for _ in range(5): self._q.pop()
+    def face2buffer(self, face:Face):
+        return [
+            face.time,
+            face.id,
+            x for x in face.points
+        ]
+    def remove(self,face:Face):
+        s = self.buffer_size
+        buffer = self.face2buffer(face)
+        for i in range(0,self._q.__len__(),s):
+            if self._q[i:i+s][:] == buffer[:]:
+                self._q[:] = self._q[:i] + self._q[i+s:] + [0 for _ in range(s)]
+                for _ in range(s): self._q.pop()
                 break
     def remove_olds(self):
         def is_old(face:FACE_TYPE):
@@ -144,6 +167,7 @@ class faceManager:
     def release(self):
         if self.locked or True:
             self.lock.release()
+            
             self.locked = False
     @property
     def status(self):

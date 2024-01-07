@@ -55,12 +55,18 @@ class sharedValue:
         else:
             return self.val.get()
 class sharedArray:
-    def __init__(self,_type,*args):
+    def __init__(self,_type,*args,noLock=False):
         self.val = mp.Array(_type,*args)
+        self.lock = not noLock
     def set(self, item):
-        with self.val.get_lock():
+        if self.lock:
+            with self.val.get_lock():
+                buffer = np.frombuffer( self.val.get_obj(),dtype=np.int8)
+                buffer[:] = item
+        else:
             buffer = np.frombuffer( self.val.get_obj(),dtype=np.int8)
             buffer[:] = item
+
 
     def get(self):
         return self.val.get_obj()
